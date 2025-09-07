@@ -9,6 +9,7 @@ import tempfile
 import sqlite3
 import json
 from datetime import datetime
+import traceback  # For better error handling
 
 # Database setup
 DB_FILE = "videos.db"
@@ -98,62 +99,71 @@ if user_input:
         # Generate and add captions
         if st.button("Generate Auto-Translated English Captions"):
             with st.spinner("Processing video for captions... This may take a while."):
-                # Create temporary files
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    video_path = os.path.join(tmpdir, "temp.mp4")
-                    audio_path = os.path.join(tmpdir, "temp.wav")
-                    vtt_path = os.path.join(tmpdir, "captions.vtt")
-                    
-                    # Download video
-                    download_video(url, video_path)
-                    
-                    # Extract audio
-                    video = VideoFileClip(video_path)
-                    audio = video.audio
-                    audio.write_audiofile(audio_path)
-                    
-                    # Transcribe with Whisper
-                    model = whisper.load_model("base")
-                    result = model.transcribe(audio_path)
-                    
-                    # Translate segments
-                    translator = Translator()
-                    vtt = webvtt.WebVTT()
-                    for segment in result['segments']:
-                        start = webvtt.from_seconds(segment['start'])
-                        end = webvtt.from_seconds(segment['end'])
-                        text = segment['text']
-                        # Translate if not English (Whisper detects language)
-                        if result.get('language', 'en') != 'en':
-                            translated = translator.translate(text, dest='en').text
-                        else:
-                            translated = text
-                        caption = webvtt.Caption(start, end, translated)
-                        vtt.captions.append(caption)
-                    
-                    vtt.save(vtt_path)
-                    
-                    # Display video with captions
-                    st.video(video_url, subtitles=vtt_path)
+                try:
+                    # Create temporary files in /tmp for cloud compatibility
+                    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+                        video_path = os.path.join(tmpdir, "temp.mp4")
+                        audio_path = os.path.join(tmpdir, "temp.wav")
+                        vtt_path = os.path.join(tmpdir, "captions.vtt")
+                        
+                        # Download video
+                        download_video(url, video_path)
+                        
+                        # Extract audio
+                        video = VideoFileClip(video_path)
+                        audio = video.audio
+                        audio.write_audiofile(audio_path)
+                        
+                        # Transcribe with Whisper - load model here to avoid startup crash
+                        model = whisper.load_model("tiny")  # Use "tiny" for lower memory/ faster on cloud
+                        result = model.transcribe(audio_path, fp16=False)  # Force CPU mode
+                        
+                        # Translate segments
+                        translator = Translator()
+                        vtt = webvtt.WebVTT()
+                        for segment in result['segments']:
+                            start = webvtt.from_seconds(segment['start'])
+                            end = webvtt.from_seconds(segment['end'])
+                            text = segment['text']
+                            # Translate if not English (Whisper detects language)
+                            if result.get('language', 'en') != 'en':
+                                translated = translator.translate(text, dest='en').text
+                            else:
+                                translated = text
+                            caption = webvtt.Caption(start, end, translated)
+                            vtt.captions.append(caption)
+                        
+                        vtt.save(vtt_path)
+                        
+                        # Display video with captions
+                        st.video(video_url, subtitles=vtt_path)
+                except Exception as e:
+                    st.error(f"Error generating captions: {str(e)}")
+                    st.info("Check if FFmpeg is installed and site is supported. Full traceback: {traceback.format_exc()}")
             
         # Download in .avi format
         if st.button("Download as .AVI"):
             with st.spinner("Converting and preparing download..."):
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    video_path = os.path.join(tmpdir, "temp.mp4")
-                    avi_path = os.path.join(tmpdir, "video.avi")
-                    
-                    download_video(url, video_path)
-                    
-                    video = VideoFileClip(video_path)
-                    video.write_videofile(avi_path, codec='libxvid')  # AVI codec
-                    
-                    with open(avi_path, "rb") as f:
-                        st.download_button("Download AVI", f, file_name="video.avi")
+                try:
+                    # Create temporary files in /tmp
+                    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+                        video_path = os.path.join(tmpdir, "temp.mp4")
+                        avi_path = os.path.join(tmpdir, "video.avi")
+                        
+                        download_video(url, video_path)
+                        
+                        video = VideoFileClip(video_path)
+                        video.write_videofile(avi_path, codec='libxvid')  # AVI codec
+                        
+                        with open(avi_path, "rb") as f:
+                            st.download_button("Download AVI", f, file_name="video.avi")
+                except Exception as e:
+                    st.error(f"Error converting to AVI: {str(e)}")
+                    st.info("Ensure FFmpeg is available. Full traceback: {traceback.format_exc()}")
     
     except Exception as e:
         st.error(f"Error processing video: {str(e)}")
-        st.info("Make sure yt-dlp supports this site. If not, you may need to update yt-dlp or find another way to extract the video URL.")
+        st.info("Make sure yt-dlp supports this site. If not, you may need to update yt-dlp or find another way to extract the video URL. Full traceback: {traceback.format_exc()}")
 
 # Display stored videos (optional, for viewing the dataset)
 if st.button("View Stored Videos"):
