@@ -1,7 +1,7 @@
-streamlit==1.38.0
-yt-dlp==2024.10.22
-moviepy==1.0.3
+streamlit>=1.38.0
+yt-dlp>=2024.10.22
+moviepy>=1.0.3
 googletrans==4.0.0-rc1
-webvtt-py==0.5.0
-whisper==0.0.1
-sqlite3  # Included in Python standard library
+webvtt-py>=0.5.0
+openai-whisper>=20231117  # Correct Whisper package; avoids conflicts
+torch>=2.1.0  # Required by Whisper; CPU version for SCC
