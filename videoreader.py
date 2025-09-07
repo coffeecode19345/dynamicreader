@@ -6,6 +6,42 @@ import webvtt
 import whisper
 import os
 import tempfile
+import sqlite3
+import json
+from datetime import datetime
+
+# Database setup
+DB_FILE = "videos.db"
+JSON_BACKUP = "inputs.json"
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS videos
+                 (number TEXT UNIQUE, link TEXT, author TEXT, timestamp DATETIME)''')
+    conn.commit()
+    conn.close()
+
+def store_in_db(number, link, author):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    timestamp = datetime.now().isoformat()
+    c.execute("INSERT OR REPLACE INTO videos (number, link, author, timestamp) VALUES (?, ?, ?, ?)",
+              (number, link, author, timestamp))
+    conn.commit()
+    conn.close()
+
+def load_json_backup():
+    if os.path.exists(JSON_BACKUP):
+        with open(JSON_BACKUP, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_to_json_backup(input_value):
+    backups = load_json_backup()
+    backups.append({"input": input_value, "timestamp": datetime.now().isoformat()})
+    with open(JSON_BACKUP, 'w') as f:
+        json.dump(backups, f)
 
 # Function to extract video info and direct URL
 def get_video_info(url):
@@ -23,13 +59,22 @@ def download_video(url, output_path):
 # Main app
 st.title("Video Streamer with Advanced Features")
 
+init_db()  # Initialize database
+
 user_input = st.text_input("Enter the full link or the video number (e.g., 1123503)")
 
 if user_input:
+    save_to_json_backup(user_input)  # Save input to JSON backup
+    
     if user_input.isdigit():
+        number = user_input
         url = f"https://hsex.icu/video-{user_input}.htm"
     else:
         url = user_input
+        # Extract number from URL if possible
+        import re
+        match = re.search(r'video-(\d+)\.htm', url)
+        number = match.group(1) if match else "unknown"
     
     try:
         info = get_video_info(url)
@@ -40,6 +85,9 @@ if user_input:
         st.write(f"Title: {title}")
         st.write(f"Author: {author}")
         st.write(f"Categorized under author: {author}")
+        
+        # Store in database
+        store_in_db(number, url, author)
         
         # Stream the video
         st.video(video_url)
@@ -106,3 +154,27 @@ if user_input:
     except Exception as e:
         st.error(f"Error processing video: {str(e)}")
         st.info("Make sure yt-dlp supports this site. If not, you may need to update yt-dlp or find another way to extract the video URL.")
+
+# Display stored videos (optional, for viewing the dataset)
+if st.button("View Stored Videos"):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT * FROM videos")
+    rows = c.fetchall()
+    conn.close()
+    if rows:
+        st.write("Stored Videos:")
+        for row in rows:
+            st.write(row)
+    else:
+        st.write("No videos stored yet.")
+
+# Display JSON backup (optional)
+if st.button("View Input Backup"):
+    backups = load_json_backup()
+    if backups:
+        st.write("Input Backups:")
+        for backup in backups:
+            st.write(backup)
+    else:
+        st.write("No backups yet.")
